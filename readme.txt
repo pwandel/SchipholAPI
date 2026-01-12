@@ -1,4 +1,4 @@
-In here the description how to couple the Schiphol API to Power Query from Microsoft
+In here the description how to connect the Schiphol API to Power Query from Microsoft
 
 The Power Query itself is part of Microsoft Excel (used to be an Add In) and Power BI.
 
