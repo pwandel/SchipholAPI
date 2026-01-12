@@ -1,0 +1,62 @@
+let
+    BaseUrl = "https://api.schiphol.nl/public-flights/flights",
+    QueryParams = "flightDirection=D&airline=KL&includedelays=false&sort=%2BscheduleTime",
+    Headers = [
+        Accept = "application/json",
+        app_id = "XXXXXXXX",                        // Replace with your own 
+        app_key = "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",  // Replace with your own 
+        ResourceVersion = "v4"
+    ],
+
+    // Function to fetch the flights array for a given page (page starts at 0)
+    FetchPage = (page as number) =>
+        let
+            Url = BaseUrl & "?" & QueryParams & "&page=" & Text.From(page),
+            Source = Json.Document(Web.Contents(Url, [Headers = Headers])),
+            Flights = try Source[flights] otherwise {}
+        in
+            Flights,
+
+    // Generate all non-empty pages
+    PagesLists = List.Generate(
+        () => [Page = 0, Flights = FetchPage(1)],
+        each not List.IsEmpty([Flights]),
+        each [Page = [Page] + 1, Flights = FetchPage([Page])],
+        each [Flights]
+    ),
+
+    // Flatten into one list of flight records
+    AllFlights = List.Combine(PagesLists),
+    #"Converted to Table" = Table.FromList(AllFlights, Splitter.SplitByNothing(), null, null, ExtraValues.Ignore),
+    #"Expanded Column1" = Table.ExpandRecordColumn(#"Converted to Table", "Column1", {"lastUpdatedAt", "actualOffBlockTime", "aircraftRegistration", "aircraftType", "checkinAllocations", "codeshares", "flightDirection", "flightName", "flightNumber", "gate", "pier", "id", "isOperationalFlight", "mainFlight", "prefixIATA", "prefixICAO", "airlineCode", "publicFlightState", "route", "scheduleDateTime", "scheduleDate", "scheduleTime", "serviceType", "terminal", "schemaVersion"}, {"Column1.lastUpdatedAt", "Column1.actualOffBlockTime", "Column1.aircraftRegistration", "Column1.aircraftType", "Column1.checkinAllocations", "Column1.codeshares", "Column1.flightDirection", "Column1.flightName", "Column1.flightNumber", "Column1.gate", "Column1.pier", "Column1.id", "Column1.isOperationalFlight", "Column1.mainFlight", "Column1.prefixIATA", "Column1.prefixICAO", "Column1.airlineCode", "Column1.publicFlightState", "Column1.route", "Column1.scheduleDateTime", "Column1.scheduleDate", "Column1.scheduleTime", "Column1.serviceType", "Column1.terminal", "Column1.schemaVersion"}),
+    #"Expanded Column1.publicFlightState" = Table.ExpandRecordColumn(#"Expanded Column1", "Column1.publicFlightState", {"flightStates"}, {"Column1.publicFlightState.flightStates"}),
+    #"Extracted Values" = Table.TransformColumns(#"Expanded Column1.publicFlightState", {"Column1.publicFlightState.flightStates", each Text.Combine(List.Transform(_, Text.From), " "), type text}),
+    #"Expanded Column1.route" = Table.ExpandRecordColumn(#"Extracted Values", "Column1.route", {"destinations", "eu", "visa"}, {"Column1.route.destinations", "Column1.route.eu", "Column1.route.visa"}),
+    #"Extracted Values1" = Table.TransformColumns(#"Expanded Column1.route", {"Column1.route.destinations", each Text.Combine(List.Transform(_, Text.From), " "), type text}),
+    #"Filtered Rows" = Table.SelectRows(#"Extracted Values1", each true),
+    #"Expanded Column1.aircraftType" = Table.ExpandRecordColumn(#"Filtered Rows", "Column1.aircraftType", {"iataMain", "iataSub"}, {"Column1.aircraftType.iataMain", "Column1.aircraftType.iataSub"}),
+    #"Expanded Column1.codeshares" = Table.ExpandRecordColumn(#"Expanded Column1.aircraftType", "Column1.codeshares", {"codeshares"}, {"Column1.codeshares.codeshares"}),
+    #"Extracted Values2" = Table.TransformColumns(#"Expanded Column1.codeshares", {"Column1.codeshares.codeshares", each Text.Combine(List.Transform(_, Text.From), " "), type text}),
+    #"Filtered Rows1" = Table.SelectRows(#"Extracted Values2", each Text.Contains([Column1.mainFlight], "KL") or Text.Contains([Column1.mainFlight], "WA")),
+    #"Replaced Errors" = Table.ReplaceErrorValues(#"Filtered Rows1", {{"Column1.codeshares.codeshares", " "}}),
+    #"Reordered Columns" = Table.ReorderColumns(#"Replaced Errors",{"Column1.scheduleDate", "Column1.scheduleTime", "Column1.actualOffBlockTime", "Column1.lastUpdatedAt", "Column1.flightName", "Column1.aircraftRegistration", "Column1.aircraftType.iataMain", "Column1.aircraftType.iataSub", "Column1.checkinAllocations", "Column1.codeshares.codeshares", "Column1.flightDirection", "Column1.flightNumber", "Column1.gate", "Column1.pier", "Column1.id", "Column1.isOperationalFlight", "Column1.mainFlight", "Column1.prefixIATA", "Column1.prefixICAO", "Column1.airlineCode", "Column1.publicFlightState.flightStates", "Column1.route.destinations", "Column1.route.eu", "Column1.route.visa", "Column1.scheduleDateTime", "Column1.serviceType", "Column1.terminal", "Column1.schemaVersion"}),
+    #"Extracted Text After Delimiter" = Table.TransformColumns(#"Reordered Columns", {{"Column1.actualOffBlockTime", each Text.AfterDelimiter(_, "T"), type text}}),
+    #"Extracted First Characters" = Table.TransformColumns(#"Extracted Text After Delimiter", {{"Column1.actualOffBlockTime", each Text.Start(_, 5), type text}}),
+    #"Changed Type" = Table.TransformColumnTypes(#"Extracted First Characters",{{"Column1.actualOffBlockTime", type time}, {"Column1.scheduleTime", type time}}),
+    #"Renamed Columns" = Table.RenameColumns(#"Changed Type",{{"Column1.scheduleDate", "ScheduleDate"}, {"Column1.scheduleTime", "ScheduleTime"}}),
+    #"Changed Type1" = Table.TransformColumnTypes(#"Renamed Columns",{{"ScheduleDate", type date}}),
+    #"Renamed Columns1" = Table.RenameColumns(#"Changed Type1",{{"Column1.actualOffBlockTime", "ActualOffBlockTime"}}),
+    #"Changed Type2" = Table.TransformColumnTypes(#"Renamed Columns1",{{"Column1.aircraftType.iataMain", type text}, {"Column1.aircraftType.iataSub", type text}}),
+    #"Reordered Columns1" = Table.ReorderColumns(#"Changed Type2",{"ScheduleDate", "ScheduleTime", "ActualOffBlockTime", "Column1.publicFlightState.flightStates", "Column1.lastUpdatedAt", "Column1.flightName", "Column1.aircraftRegistration", "Column1.aircraftType.iataMain", "Column1.aircraftType.iataSub", "Column1.route.destinations", "Column1.codeshares.codeshares", "Column1.checkinAllocations", "Column1.flightDirection", "Column1.flightNumber", "Column1.gate", "Column1.pier", "Column1.id", "Column1.isOperationalFlight", "Column1.mainFlight", "Column1.prefixIATA", "Column1.prefixICAO", "Column1.airlineCode", "Column1.route.eu", "Column1.route.visa", "Column1.scheduleDateTime", "Column1.serviceType", "Column1.terminal", "Column1.schemaVersion"}),
+    #"Removed Columns" = Table.RemoveColumns(#"Reordered Columns1",{"Column1.schemaVersion", "Column1.serviceType"}),
+    #"Replaced Value" = Table.ReplaceValue(#"Removed Columns","DEP","Departed",Replacer.ReplaceText,{"Column1.publicFlightState.flightStates"}),
+    #"Replaced Value1" = Table.ReplaceValue(#"Replaced Value","CNX","Cancelled",Replacer.ReplaceText,{"Column1.publicFlightState.flightStates"}),
+    #"Replaced Value2" = Table.ReplaceValue(#"Replaced Value1","SCH","Scheduled",Replacer.ReplaceText,{"Column1.publicFlightState.flightStates"}),
+    #"Renamed Columns2" = Table.RenameColumns(#"Replaced Value2",{{"Column1.aircraftRegistration", "aircraftRegistration"}, {"Column1.aircraftType.iataMain", "aircraftType.iataMain"}, {"Column1.aircraftType.iataSub", "aircraftType.iataSub"}, {"Column1.lastUpdatedAt", "lastUpdatedAt"}, {"Column1.publicFlightState.flightStates", "publicFlightState.flightStates"}, {"Column1.route.destinations", "route.destinations"}}),
+    #"Extracted Text After Delimiter1" = Table.TransformColumns(#"Renamed Columns2", {{"lastUpdatedAt", each Text.AfterDelimiter(_, "T"), type text}}),
+    #"Extracted First Characters1" = Table.TransformColumns(#"Extracted Text After Delimiter1", {{"lastUpdatedAt", each Text.Start(_, 8), type text}}),
+    #"Changed Type3" = Table.TransformColumnTypes(#"Extracted First Characters1",{{"lastUpdatedAt", type time}}),
+    #"Reordered Columns2" = Table.ReorderColumns(#"Changed Type3",{"ScheduleDate", "ScheduleTime", "ActualOffBlockTime", "lastUpdatedAt", "publicFlightState.flightStates", "Column1.flightName", "aircraftRegistration", "aircraftType.iataMain", "aircraftType.iataSub", "route.destinations", "Column1.codeshares.codeshares", "Column1.checkinAllocations", "Column1.flightDirection", "Column1.flightNumber", "Column1.gate", "Column1.pier", "Column1.id", "Column1.isOperationalFlight", "Column1.mainFlight", "Column1.prefixIATA", "Column1.prefixICAO", "Column1.airlineCode", "Column1.route.eu", "Column1.route.visa", "Column1.scheduleDateTime", "Column1.terminal"}),
+    #"Removed Duplicates" = Table.Distinct(#"Reordered Columns2", {"Column1.id"})
+in
+    #"Removed Duplicates"
