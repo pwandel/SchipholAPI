@@ -1,4 +1,4 @@
-In here the descriptiob how to couple the Schiphol API to Power Query from Microsoft
+In here the description how to couple the Schiphol API to Power Query from Microsoft
 
 The Power Query itself is part of Microsoft Excel (used to be an Add In) and Power BI.
 
@@ -12,4 +12,4 @@ app-id and the app-key, now filled with XXXXX.
 
 Once these have been updated to your credentials it should work.
 
-It will show after refresh the current (today) Departures from KLM into an Excel Sheet 
+It will show after refresh the current (today) Departures Amsterdam/Schiphol from KLM into an Excel Sheet 
